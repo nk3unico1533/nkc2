@@ -22,8 +22,8 @@ app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- CONFIGURAÇÕES DE SEGURANÇA E EXFILTRAÇÃO ---
-const AGENT_SHARED_SECRET = process.env.AGENT_SECRET || 'YOUR_SUPER_SECRET_AGENT_KEY'; // Use uma chave forte!
-const CONSOLE_API_KEY = process.env.CONSOLE_API_KEY || 'YOUR_SUPER_SECRET_CONSOLE_KEY'; // Para autenticar a UI
+const AGENT_SHARED_SECRET = process.env.AGENT_SECRET || 'nk'; // Use uma chave forte!
+const CONSOLE_API_KEY = process.env.CONSOLE_API_KEY || 'consolenk'; // Para autenticar a UI
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 
 // Garante que o diretório de uploads exista
