@@ -1,4 +1,4 @@
-/ NK HYDRA C2 SERVER v28.9
+// NK HYDRA C2 SERVER v28.9
 // COMMAND: node c2_server.js
 
 const express = require('express');
