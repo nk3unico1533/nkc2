@@ -71,11 +71,6 @@ io.on('connection', (socket) => {
 
     socket.on('stream_log', (data) => {
         io.emit('log', `[${data.from}][${data.type}] ${data.output}`);
-        
-        // CMDB Intelligence Parsing (Basic)
-        if (data.output.includes('Discovered open port')) {
-            // Logic to update CMDB would go here
-        }
     });
 
     socket.on('file_exfil', (data) => {
