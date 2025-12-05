@@ -1,4 +1,4 @@
-/* NK HYDRA C2 SERVER v33.0 */
+/* NK HYDRA C2 SERVER v34.0 */
 /* SINGULARITY HIVE PROTOCOL */
 /* FIX: HIGH TIMEOUTS FOR RENDER STABILITY */
 
@@ -10,7 +10,7 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-app.get('/', (req, res) => res.send('NK C2 v33 ONLINE'));
+app.get('/', (req, res) => res.send('NK C2 v34 ONLINE'));
 
 const server = http.createServer(app);
 const io = new Server(server, { 
