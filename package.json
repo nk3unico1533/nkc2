@@ -1,14 +1,18 @@
 {
-  "name": "nk-hydra-c3",
-  "version": "3.0.0",
-  "description": "NK Autonomous C2 Server - Warlord Edition",
+  "name": "hydra-c2",
+  "version": "1.0.0",
+  "description": "Hydra C2 - Comando Central do NK",
   "main": "server.js",
-  "dependencies": {
-    "express": "^4.18.2",
-    "socket.io": "^4.7.4",
-    "cors": "^2.8.5"
-  },
   "scripts": {
     "start": "node server.js"
-  }
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "body-parser": "^1.20.2",
+    "readline": "^1.3.0",
+    "base-64": "^1.0.0",
+    "chalk": "^4.1.2"
+  },
+  "author": "NK (Neural Killer)",
+  "license": "ISC"
 }
